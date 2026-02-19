@@ -16,3 +16,4 @@ This add‑on hooks into the reviewer and patches AMBOSS’s tooltip trigger at 
 - **Version 1.1** — Added broader patching: updates existing tooltip instances, delegate options, retries initialization, and scans DOM elements for active tooltips.
 - **Version 1.2** — Major robustness upgrade with full manager patching, click-gate logic, outside-click closing, animation-aware hiding, controller interception, and multi-fallback compatibility handling.
 - **Version 1.3** — Fixed one-by-one cloze compatibility by handling marker clicks directly in the capture phase, so cloze click handlers that stop propagation no longer block AMBOSS tooltip display.
+- **Version 2.0** — Cross-platform compatibility release: fixed one-by-one cloze behavior on Windows (template-injected AMBOSS runtime) by patching one-by-one click propagation for AMBOSS markers while preserving click-to-open behavior across normal and one-by-one cards.
