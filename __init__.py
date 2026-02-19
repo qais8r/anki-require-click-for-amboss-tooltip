@@ -83,10 +83,93 @@ _AMBOSS_TRIGGER_PATCH_JS = r"""
     return null;
   }
 
+  function resolveTooltipManager(manager) {
+    if (manager && typeof manager === "object") {
+      return manager;
+    }
+
+    var controller = window.ambossController;
+    if (
+      controller &&
+      typeof controller === "object" &&
+      controller.ambossTooltips &&
+      typeof controller.ambossTooltips === "object"
+    ) {
+      return controller.ambossTooltips;
+    }
+
+    var addon = window.ambossAddon && window.ambossAddon.tooltip;
+    if (addon && typeof addon === "object") {
+      return addon.tooltips || addon;
+    }
+
+    return null;
+  }
+
+  function hideAllTooltips(manager) {
+    var resolvedManager = resolveTooltipManager(manager);
+
+    try {
+      if (resolvedManager && typeof resolvedManager.hideAll === "function") {
+        resolvedManager.hideAll();
+        return true;
+      }
+
+      var addon = window.ambossAddon && window.ambossAddon.tooltip;
+      if (addon && addon.tooltips && typeof addon.tooltips.hideAll === "function") {
+        addon.tooltips.hideAll();
+        return true;
+      }
+
+      if (window.tippy && typeof window.tippy.hideAll === "function") {
+        window.tippy.hideAll({ duration: 0 });
+        return true;
+      }
+    } catch (_error) {}
+
+    return false;
+  }
+
+  function isVisibleTooltipForMarker(marker, manager) {
+    if (!marker) {
+      return false;
+    }
+
+    try {
+      if (
+        marker._tippy &&
+        marker._tippy.state &&
+        marker._tippy.state.isVisible
+      ) {
+        return true;
+      }
+
+      var resolvedManager = resolveTooltipManager(manager);
+      if (
+        resolvedManager &&
+        resolvedManager.tooltipVisible === true &&
+        typeof marker.getAttribute === "function"
+      ) {
+        var phraseId = marker.getAttribute("data-phrase-id");
+        if (
+          phraseId &&
+          resolvedManager.lastPhraseId &&
+          String(resolvedManager.lastPhraseId) === String(phraseId)
+        ) {
+          return true;
+        }
+      }
+    } catch (_error) {}
+
+    return false;
+  }
+
   function showTooltipOnClick(marker, manager) {
     if (!marker) {
       return false;
     }
+
+    var resolvedManager = resolveTooltipManager(manager);
 
     try {
       patchInstance(marker._tippy);
@@ -95,8 +178,8 @@ _AMBOSS_TRIGGER_PATCH_JS = r"""
         return true;
       }
 
-      if (manager && typeof manager.showTooltipOnElement === "function") {
-        manager.showTooltipOnElement(marker);
+      if (resolvedManager && typeof resolvedManager.showTooltipOnElement === "function") {
+        resolvedManager.showTooltipOnElement(marker);
         return true;
       }
 
@@ -115,7 +198,8 @@ _AMBOSS_TRIGGER_PATCH_JS = r"""
   }
 
   function installClickGate(manager) {
-    var selector = (manager && manager.selector) || "#qa";
+    var resolvedManager = resolveTooltipManager(manager);
+    var selector = (resolvedManager && resolvedManager.selector) || "#qa";
     if (typeof selector !== "string") {
       return false;
     }
@@ -128,7 +212,7 @@ _AMBOSS_TRIGGER_PATCH_JS = r"""
       return true;
     }
 
-    var markClass = (manager && manager.markClass) || "amboss-marker";
+    var markClass = (resolvedManager && resolvedManager.markClass) || "amboss-marker";
     var markerSelector = "." + markClass;
 
     var blockHoverAndFocus = function (event) {
@@ -156,10 +240,49 @@ _AMBOSS_TRIGGER_PATCH_JS = r"""
         if (!marker) {
           return;
         }
-        showTooltipOnClick(marker, manager);
+
+        if (typeof event.stopImmediatePropagation === "function") {
+          event.stopImmediatePropagation();
+        }
+        if (typeof event.stopPropagation === "function") {
+          event.stopPropagation();
+        }
+
+        if (isVisibleTooltipForMarker(marker, resolvedManager)) {
+          hideAllTooltips(resolvedManager);
+          return;
+        }
+
+        showTooltipOnClick(marker, resolvedManager);
       },
       true
     );
+
+    if (!document.__ambossForceClickOutsideInstalled) {
+      document.addEventListener(
+        "click",
+        function (event) {
+          var target = event.target;
+          if (!target) {
+            return;
+          }
+
+          var marker = findClosestMarker(target, ".amboss-marker");
+          if (marker) {
+            return;
+          }
+
+          var node = target.nodeType === 3 ? target.parentElement : target;
+          if (node && typeof node.closest === "function" && node.closest(".tippy-popper")) {
+            return;
+          }
+
+          hideAllTooltips(null);
+        },
+        true
+      );
+      document.__ambossForceClickOutsideInstalled = true;
+    }
 
     root.__ambossForceClickGateInstalled = true;
     return true;
