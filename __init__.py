@@ -3,6 +3,8 @@ from aqt import gui_hooks, mw
 _AMBOSS_TRIGGER_PATCH_JS = r"""
 (function () {
   var FORCE_TRIGGER = "click";
+  var ROOT_SELECTOR = "#qa";
+  var MARKER_SELECTOR = ".amboss-marker";
 
   function setTriggerOnOptions(options) {
     if (!options || typeof options !== "object") {
@@ -31,6 +33,7 @@ _AMBOSS_TRIGGER_PATCH_JS = r"""
         return true;
       }
     } catch (_error) {}
+
     return false;
   }
 
@@ -41,52 +44,45 @@ _AMBOSS_TRIGGER_PATCH_JS = r"""
     return patchInstance(element._tippy);
   }
 
-  function patchExistingTippies(root) {
-    if (!root || typeof root.querySelectorAll !== "function") {
-      return false;
-    }
-
-    var patched = patchElementTippy(root);
-    var elements = root.querySelectorAll("*");
-    for (var i = 0; i < elements.length; i += 1) {
-      if (patchElementTippy(elements[i])) {
-        patched = true;
-      }
-    }
-    return patched;
-  }
-
-  function findClosestMarker(target, markerSelector) {
-    if (!target || !markerSelector) {
+  function closestMarker(target) {
+    if (!target) {
       return null;
     }
 
-    var node = target;
-    if (node.nodeType === 3) {
-      node = node.parentElement;
-    }
-
+    var node = target.nodeType === 3 ? target.parentElement : target;
     if (node && typeof node.closest === "function") {
-      return node.closest(markerSelector);
+      return node.closest(MARKER_SELECTOR);
     }
 
     while (node && node !== document) {
       if (
         node.nodeType === 1 &&
         typeof node.matches === "function" &&
-        node.matches(markerSelector)
+        node.matches(MARKER_SELECTOR)
       ) {
         return node;
       }
       node = node.parentNode;
     }
+
     return null;
   }
 
-  function resolveTooltipManager(manager) {
-    if (manager && typeof manager === "object") {
-      return manager;
+  function isInsideTooltip(target) {
+    if (!target) {
+      return false;
     }
+
+    var node = target.nodeType === 3 ? target.parentElement : target;
+    if (!node || typeof node.closest !== "function") {
+      return false;
+    }
+
+    return Boolean(node.closest(".tippy-popper, .tippy-box, [data-tippy-root]"));
+  }
+
+  function resolveManagers() {
+    var managers = [];
 
     var controller = window.ambossController;
     if (
@@ -95,309 +91,28 @@ _AMBOSS_TRIGGER_PATCH_JS = r"""
       controller.ambossTooltips &&
       typeof controller.ambossTooltips === "object"
     ) {
-      return controller.ambossTooltips;
+      managers.push(controller.ambossTooltips);
     }
 
     var addon = window.ambossAddon && window.ambossAddon.tooltip;
-    if (addon && typeof addon === "object") {
-      return addon.tooltips || addon;
+    if (addon && (typeof addon === "object" || typeof addon === "function")) {
+      managers.push(addon);
+      if (addon.tooltips) {
+        managers.push(addon.tooltips);
+      }
+      if (addon.default) {
+        managers.push(addon.default);
+      }
     }
 
-    return null;
-  }
-
-  function hideAllTooltips(manager) {
-    var resolvedManager = resolveTooltipManager(manager);
-
-    try {
-      if (resolvedManager && typeof resolvedManager.hideAll === "function") {
-        resolvedManager.hideAll();
-        return true;
+    var unique = [];
+    for (var i = 0; i < managers.length; i += 1) {
+      if (managers[i] && unique.indexOf(managers[i]) === -1) {
+        unique.push(managers[i]);
       }
-
-      var addon = window.ambossAddon && window.ambossAddon.tooltip;
-      if (addon && addon.tooltips && typeof addon.tooltips.hideAll === "function") {
-        addon.tooltips.hideAll();
-        return true;
-      }
-
-      if (window.tippy && typeof window.tippy.hideAll === "function") {
-        window.tippy.hideAll({ duration: 0 });
-        return true;
-      }
-    } catch (_error) {}
-
-    return false;
-  }
-
-  function hideVisibleTippiesWithAnimation(root) {
-    var context = root || document;
-    var hiddenAny = false;
-
-    try {
-      var markers = context.querySelectorAll
-        ? context.querySelectorAll(".amboss-marker")
-        : [];
-      for (var i = 0; i < markers.length; i += 1) {
-        var marker = markers[i];
-        if (
-          marker &&
-          marker._tippy &&
-          marker._tippy.state &&
-          marker._tippy.state.isVisible &&
-          typeof marker._tippy.hide === "function"
-        ) {
-          marker._tippy.hide();
-          hiddenAny = true;
-        }
-      }
-
-      if (
-        context &&
-        context._tippy &&
-        context._tippy.state &&
-        context._tippy.state.isVisible &&
-        typeof context._tippy.hide === "function"
-      ) {
-        context._tippy.hide();
-        hiddenAny = true;
-      }
-    } catch (_error) {}
-
-    return hiddenAny;
-  }
-
-  function isVisibleTooltipForMarker(marker, manager) {
-    if (!marker) {
-      return false;
     }
 
-    try {
-      if (
-        marker._tippy &&
-        marker._tippy.state &&
-        marker._tippy.state.isVisible
-      ) {
-        return true;
-      }
-
-      var resolvedManager = resolveTooltipManager(manager);
-      if (
-        resolvedManager &&
-        resolvedManager.tooltipVisible === true &&
-        typeof marker.getAttribute === "function"
-      ) {
-        var phraseId = marker.getAttribute("data-phrase-id");
-        if (
-          phraseId &&
-          resolvedManager.lastPhraseId &&
-          String(resolvedManager.lastPhraseId) === String(phraseId)
-        ) {
-          return true;
-        }
-      }
-    } catch (_error) {}
-
-    return false;
-  }
-
-  function showTooltipOnClick(marker, manager) {
-    if (!marker) {
-      return false;
-    }
-
-    var resolvedManager = resolveTooltipManager(manager);
-
-    try {
-      patchInstance(marker._tippy);
-      if (marker._tippy && typeof marker._tippy.show === "function") {
-        marker._tippy.show();
-        return true;
-      }
-
-      if (resolvedManager && typeof resolvedManager.showTooltipOnElement === "function") {
-        resolvedManager.showTooltipOnElement(marker);
-        return true;
-      }
-
-      var addon = window.ambossAddon && window.ambossAddon.tooltip;
-      if (addon && addon.tooltips && typeof addon.tooltips.showTooltipOnElement === "function") {
-        addon.tooltips.showTooltipOnElement(marker);
-        return true;
-      }
-      if (addon && typeof addon.showTooltipOnElement === "function") {
-        addon.showTooltipOnElement(marker);
-        return true;
-      }
-    } catch (_error) {}
-
-    return false;
-  }
-
-  function installClickGate(manager) {
-    var resolvedManager = resolveTooltipManager(manager);
-    var selector = (resolvedManager && resolvedManager.selector) || "#qa";
-    if (typeof selector !== "string") {
-      return false;
-    }
-
-    var root = document.querySelector(selector);
-    if (!root) {
-      return false;
-    }
-    if (root.__ambossForceClickGateInstalled) {
-      return true;
-    }
-
-    var markClass = (resolvedManager && resolvedManager.markClass) || "amboss-marker";
-    var markerSelector = "." + markClass;
-
-    var blockHoverAndFocus = function (event) {
-      var marker = findClosestMarker(event.target, markerSelector);
-      if (!marker) {
-        return;
-      }
-      if (typeof event.stopImmediatePropagation === "function") {
-        event.stopImmediatePropagation();
-      }
-      if (typeof event.stopPropagation === "function") {
-        event.stopPropagation();
-      }
-    };
-
-    root.addEventListener("mouseover", blockHoverAndFocus, true);
-    root.addEventListener("mousemove", blockHoverAndFocus, true);
-    root.addEventListener("mouseenter", blockHoverAndFocus, true);
-    root.addEventListener("focusin", blockHoverAndFocus, true);
-
-    root.addEventListener(
-      "click",
-      function (event) {
-        var marker = findClosestMarker(event.target, markerSelector);
-        if (!marker) {
-          return;
-        }
-
-        var stopMarkerEvent = function () {
-          if (typeof event.stopImmediatePropagation === "function") {
-            event.stopImmediatePropagation();
-          }
-          if (typeof event.stopPropagation === "function") {
-            event.stopPropagation();
-          }
-          if (typeof event.preventDefault === "function") {
-            event.preventDefault();
-          }
-        };
-
-        if (isVisibleTooltipForMarker(marker, resolvedManager)) {
-          stopMarkerEvent();
-          var hidden = false;
-          if (marker._tippy && typeof marker._tippy.hide === "function") {
-            marker._tippy.hide();
-            hidden = true;
-          }
-          if (!hidden) {
-            hideVisibleTippiesWithAnimation(root);
-          }
-          return;
-        }
-
-        // Handle marker clicks directly so one-by-one cloze click handlers
-        // (which stop propagation) cannot block AMBOSS delegated handlers.
-        if (showTooltipOnClick(marker, resolvedManager)) {
-          stopMarkerEvent();
-          return;
-        }
-
-        // Fallback: let AMBOSS/tippy's delegated click handler create/show the tooltip.
-        patchInstance(marker._tippy);
-      },
-      true
-    );
-
-    if (!document.__ambossForceClickOutsideInstalled) {
-      document.addEventListener(
-        "click",
-        function (event) {
-          var target = event.target;
-          if (!target) {
-            return;
-          }
-
-          var marker = findClosestMarker(target, ".amboss-marker");
-          if (marker) {
-            return;
-          }
-
-          var node = target.nodeType === 3 ? target.parentElement : target;
-          if (node && typeof node.closest === "function" && node.closest(".tippy-popper")) {
-            return;
-          }
-
-          if (!hideVisibleTippiesWithAnimation(document.querySelector("#qa"))) {
-            hideAllTooltips(null);
-          }
-        },
-        true
-      );
-      document.__ambossForceClickOutsideInstalled = true;
-    }
-
-    root.__ambossForceClickGateInstalled = true;
-    return true;
-  }
-
-  function patchDeckTemplateController(controller) {
-    if (!controller || typeof controller !== "object") {
-      return false;
-    }
-
-    var patched = false;
-    var tooltipManager = controller.ambossTooltips;
-    if (!tooltipManager || typeof tooltipManager !== "object") {
-      return false;
-    }
-
-    if (setTriggerOnOptions(tooltipManager.tippyOptions)) {
-      patched = true;
-    }
-    if (tooltipManager.tippyOptions && typeof tooltipManager.tippyOptions === "object") {
-      tooltipManager.tippyOptions.trigger = FORCE_TRIGGER;
-      patched = true;
-    }
-
-    if (
-      !tooltipManager.__forceClickPatched &&
-      typeof tooltipManager.initialize === "function"
-    ) {
-      var originalInitialize = tooltipManager.initialize;
-      tooltipManager.initialize = function () {
-        setTriggerOnOptions(this && this.tippyOptions);
-        if (this && this.tippyOptions) {
-          this.tippyOptions.trigger = FORCE_TRIGGER;
-        }
-        var value = originalInitialize.apply(this, arguments);
-        var root = document.querySelector((this && this.selector) || "#qa");
-        if (root) {
-          patchInstance(root._tippy);
-        }
-        return value;
-      };
-      tooltipManager.__forceClickPatched = true;
-      patched = true;
-    }
-
-    if (installClickGate(tooltipManager)) {
-      patched = true;
-    }
-
-    var root = document.querySelector((tooltipManager && tooltipManager.selector) || "#qa");
-    if (root && patchInstance(root._tippy)) {
-      patched = true;
-    }
-
-    return patched;
+    return unique;
   }
 
   function patchManager(manager) {
@@ -422,35 +137,20 @@ _AMBOSS_TRIGGER_PATCH_JS = r"""
       }
     }
 
-    if (installClickGate(manager)) {
-      patched = true;
-    }
-
-    var selector = manager.selector || "#qa";
-    if (typeof selector === "string") {
-      var root = document.querySelector(selector);
-      if (root) {
-        if (patchInstance(root._tippy)) {
-          patched = true;
-        }
-        if (patchExistingTippies(root)) {
-          patched = true;
-        }
-      }
-    }
-
-    if (!manager.__forceClickPatched && typeof manager.initialize === "function") {
+    if (!manager.__forceClickInitPatched && typeof manager.initialize === "function") {
       var originalInitialize = manager.initialize;
       manager.initialize = function () {
         setTriggerOnOptions(this && this.tippyOptions);
+        setTriggerOnOptions(this && this.delegateOptions);
         var value = originalInitialize.apply(this, arguments);
-        var root = document.querySelector((this && this.selector) || "#qa");
+        var selector = (this && this.selector) || ROOT_SELECTOR;
+        var root = typeof selector === "string" ? document.querySelector(selector) : null;
         if (root) {
-          patchInstance(root._tippy);
+          patchElementTippy(root);
         }
         return value;
       };
-      manager.__forceClickPatched = true;
+      manager.__forceClickInitPatched = true;
       patched = true;
     }
 
@@ -458,11 +158,12 @@ _AMBOSS_TRIGGER_PATCH_JS = r"""
       !manager.__forceClickCreatePatched &&
       typeof manager._createTippyOnElement === "function"
     ) {
-      var originalCreateTippyOnElement = manager._createTippyOnElement;
+      var originalCreate = manager._createTippyOnElement;
       manager._createTippyOnElement = function (element) {
         setTriggerOnOptions(this && this.tippyOptions);
-        var instance = originalCreateTippyOnElement.call(this, element);
+        var instance = originalCreate.call(this, element);
         patchInstance(instance);
+        patchElementTippy(element);
         return instance;
       };
       manager.__forceClickCreatePatched = true;
@@ -472,38 +173,27 @@ _AMBOSS_TRIGGER_PATCH_JS = r"""
     return patched;
   }
 
-  function apply() {
+  function patchManagers() {
+    var managers = resolveManagers();
     var patched = false;
-    var addon = window.ambossAddon && window.ambossAddon.tooltip;
-    if (addon) {
-      if (patchManager(addon)) {
-        patched = true;
-      }
-      if (patchManager(addon.tooltips)) {
-        patched = true;
-      }
-      if (patchManager(addon.default)) {
-        patched = true;
-      }
-
-      if (installClickGate(addon.tooltips || addon)) {
+    for (var i = 0; i < managers.length; i += 1) {
+      if (patchManager(managers[i])) {
         patched = true;
       }
     }
+    return patched;
+  }
 
-    if (patchDeckTemplateController(window.ambossController)) {
+  function patchExistingElements() {
+    var patched = false;
+    var root = document.querySelector(ROOT_SELECTOR);
+    if (root && patchElementTippy(root)) {
       patched = true;
     }
 
-    var qa = document.querySelector("#qa");
-    if (qa) {
-      if (patchInstance(qa._tippy)) {
-        patched = true;
-      }
-      if (patchExistingTippies(qa)) {
-        patched = true;
-      }
-      if (installClickGate(null)) {
+    var markers = document.querySelectorAll(MARKER_SELECTOR);
+    for (var i = 0; i < markers.length; i += 1) {
+      if (patchElementTippy(markers[i])) {
         patched = true;
       }
     }
@@ -511,15 +201,204 @@ _AMBOSS_TRIGGER_PATCH_JS = r"""
     return patched;
   }
 
-  apply();
+  function getOrCreateMarkerInstance(marker) {
+    if (!marker) {
+      return null;
+    }
+
+    if (marker._tippy) {
+      patchInstance(marker._tippy);
+      return marker._tippy;
+    }
+
+    var managers = resolveManagers();
+    for (var i = 0; i < managers.length; i += 1) {
+      var manager = managers[i];
+      if (!manager || typeof manager._createTippyOnElement !== "function") {
+        continue;
+      }
+
+      try {
+        var created = manager._createTippyOnElement(marker);
+        patchInstance(created);
+        patchElementTippy(marker);
+        if (marker._tippy) {
+          return marker._tippy;
+        }
+        if (created) {
+          return created;
+        }
+      } catch (_error) {}
+    }
+
+    return marker._tippy || null;
+  }
+
+  function showTooltipFromManagers(marker) {
+    var managers = resolveManagers();
+
+    for (var i = 0; i < managers.length; i += 1) {
+      var manager = managers[i];
+      if (!manager || typeof manager.showTooltipOnElement !== "function") {
+        continue;
+      }
+      try {
+        manager.showTooltipOnElement(marker);
+        patchElementTippy(marker);
+        if (
+          marker._tippy &&
+          marker._tippy.state &&
+          marker._tippy.state.isVisible
+        ) {
+          return true;
+        }
+      } catch (_error) {}
+    }
+
+    return false;
+  }
+
+  function hideAllTooltips() {
+    var hidden = false;
+
+    try {
+      if (window.tippy && typeof window.tippy.hideAll === "function") {
+        window.tippy.hideAll({ duration: 0 });
+        hidden = true;
+      }
+    } catch (_error) {}
+
+    var managers = resolveManagers();
+    for (var i = 0; i < managers.length; i += 1) {
+      var manager = managers[i];
+      if (!manager || typeof manager.hideAll !== "function") {
+        continue;
+      }
+      try {
+        manager.hideAll();
+        hidden = true;
+      } catch (_error) {}
+    }
+
+    try {
+      var markers = document.querySelectorAll(MARKER_SELECTOR);
+      for (var j = 0; j < markers.length; j += 1) {
+        var instance = markers[j]._tippy;
+        if (
+          instance &&
+          instance.state &&
+          instance.state.isVisible &&
+          typeof instance.hide === "function"
+        ) {
+          instance.hide();
+          hidden = true;
+        }
+      }
+    } catch (_error) {}
+
+    return hidden;
+  }
+
+  function stopEvent(event) {
+    if (typeof event.stopImmediatePropagation === "function") {
+      event.stopImmediatePropagation();
+    }
+    if (typeof event.stopPropagation === "function") {
+      event.stopPropagation();
+    }
+    if (typeof event.preventDefault === "function") {
+      event.preventDefault();
+    }
+  }
+
+  function onClickCapture(event) {
+    var marker = closestMarker(event.target);
+    if (marker) {
+      var instance = getOrCreateMarkerInstance(marker);
+
+      if (
+        instance &&
+        instance.state &&
+        instance.state.isVisible &&
+        typeof instance.hide === "function"
+      ) {
+        instance.hide();
+        stopEvent(event);
+        return;
+      }
+
+      if (instance && typeof instance.show === "function") {
+        patchInstance(instance);
+        instance.show();
+        stopEvent(event);
+        return;
+      }
+
+      if (showTooltipFromManagers(marker)) {
+        stopEvent(event);
+      }
+      return;
+    }
+
+    if (isInsideTooltip(event.target)) {
+      return;
+    }
+
+    hideAllTooltips();
+  }
+
+  function applyPatch() {
+    patchManagers();
+    patchExistingElements();
+  }
+
+  var previous = window.__ambossRequireClickState;
+  if (previous) {
+    if (Array.isArray(previous.listeners)) {
+      for (var i = 0; i < previous.listeners.length; i += 1) {
+        var listener = previous.listeners[i];
+        document.removeEventListener(listener[0], listener[1], true);
+      }
+    }
+    if (previous.observer && typeof previous.observer.disconnect === "function") {
+      previous.observer.disconnect();
+    }
+    if (previous.timer) {
+      clearInterval(previous.timer);
+    }
+  }
+
+  var listeners = [];
+  document.addEventListener("click", onClickCapture, true);
+  listeners.push(["click", onClickCapture]);
+
+  var observer = null;
+  try {
+    var root = document.querySelector(ROOT_SELECTOR) || document.documentElement;
+    if (root && typeof MutationObserver === "function") {
+      observer = new MutationObserver(function () {
+        applyPatch();
+      });
+      observer.observe(root, { childList: true, subtree: true });
+    }
+  } catch (_error) {}
+
+  applyPatch();
+
   var attempts = 0;
   var timer = setInterval(function () {
     attempts += 1;
-    apply();
-    if (attempts >= 300) {
+    applyPatch();
+    if (attempts >= 200) {
       clearInterval(timer);
     }
   }, 50);
+
+  window.__ambossRequireClickState = {
+    listeners: listeners,
+    observer: observer,
+    timer: timer,
+  };
 })();
 """
 
