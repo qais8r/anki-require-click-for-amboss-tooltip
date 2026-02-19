@@ -241,19 +241,22 @@ _AMBOSS_TRIGGER_PATCH_JS = r"""
           return;
         }
 
-        if (typeof event.stopImmediatePropagation === "function") {
-          event.stopImmediatePropagation();
-        }
-        if (typeof event.stopPropagation === "function") {
-          event.stopPropagation();
-        }
-
         if (isVisibleTooltipForMarker(marker, resolvedManager)) {
+          if (typeof event.stopImmediatePropagation === "function") {
+            event.stopImmediatePropagation();
+          }
+          if (typeof event.stopPropagation === "function") {
+            event.stopPropagation();
+          }
+          if (marker._tippy && typeof marker._tippy.hide === "function") {
+            marker._tippy.hide();
+          }
           hideAllTooltips(resolvedManager);
           return;
         }
 
-        showTooltipOnClick(marker, resolvedManager);
+        // Let AMBOSS/tippy's own delegated click handler create/show the tooltip.
+        patchInstance(marker._tippy);
       },
       true
     );
