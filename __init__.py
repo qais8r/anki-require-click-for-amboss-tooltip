@@ -3,14 +3,15 @@ from aqt import gui_hooks, mw
 _AMBOSS_TRIGGER_PATCH_JS = r"""
 (function () {
   var FORCE_TRIGGER = "click";
+  var COMPAT_TRIGGER = "mouseenter click";
   var ROOT_SELECTOR = "#qa";
   var MARKER_SELECTOR = ".amboss-marker";
 
-  function setTriggerOnOptions(options) {
+  function setTriggerOnOptions(options, triggerValue) {
     if (!options || typeof options !== "object") {
       return false;
     }
-    options.trigger = FORCE_TRIGGER;
+    options.trigger = triggerValue || FORCE_TRIGGER;
     return true;
   }
 
@@ -122,10 +123,21 @@ _AMBOSS_TRIGGER_PATCH_JS = r"""
 
     var patched = false;
 
-    if (setTriggerOnOptions(manager.tippyOptions)) {
+    var forceTrigger = FORCE_TRIGGER;
+    if (
+      manager &&
+      typeof manager.showTooltipOnElement !== "function" &&
+      typeof manager.hideAll === "function"
+    ) {
+      // Template-injected AMBOSS runtime relies on delegated hover internals.
+      // Keep hover trigger enabled and gate it ourselves, then open on click.
+      forceTrigger = COMPAT_TRIGGER;
+    }
+
+    if (setTriggerOnOptions(manager.tippyOptions, forceTrigger)) {
       patched = true;
     }
-    if (setTriggerOnOptions(manager.delegateOptions)) {
+    if (setTriggerOnOptions(manager.delegateOptions, forceTrigger)) {
       patched = true;
     }
 
@@ -140,8 +152,16 @@ _AMBOSS_TRIGGER_PATCH_JS = r"""
     if (!manager.__forceClickInitPatched && typeof manager.initialize === "function") {
       var originalInitialize = manager.initialize;
       manager.initialize = function () {
-        setTriggerOnOptions(this && this.tippyOptions);
-        setTriggerOnOptions(this && this.delegateOptions);
+        var initTrigger = FORCE_TRIGGER;
+        if (
+          this &&
+          typeof this.showTooltipOnElement !== "function" &&
+          typeof this.hideAll === "function"
+        ) {
+          initTrigger = COMPAT_TRIGGER;
+        }
+        setTriggerOnOptions(this && this.tippyOptions, initTrigger);
+        setTriggerOnOptions(this && this.delegateOptions, initTrigger);
         var value = originalInitialize.apply(this, arguments);
         var selector = (this && this.selector) || ROOT_SELECTOR;
         var root = typeof selector === "string" ? document.querySelector(selector) : null;
@@ -160,7 +180,7 @@ _AMBOSS_TRIGGER_PATCH_JS = r"""
     ) {
       var originalCreate = manager._createTippyOnElement;
       manager._createTippyOnElement = function (element) {
-        setTriggerOnOptions(this && this.tippyOptions);
+        setTriggerOnOptions(this && this.tippyOptions, FORCE_TRIGGER);
         var instance = originalCreate.call(this, element);
         patchInstance(instance);
         patchElementTippy(element);
@@ -311,6 +331,54 @@ _AMBOSS_TRIGGER_PATCH_JS = r"""
     }
   }
 
+  function syntheticOpenFromClick(marker) {
+    if (!marker || typeof marker.dispatchEvent !== "function") {
+      return false;
+    }
+
+    marker.__ambossSyntheticOpen = true;
+    try {
+      // Delegated tippy listeners are often bound to mouseover/mouseenter.
+      marker.dispatchEvent(
+        new MouseEvent("mouseover", {
+          bubbles: true,
+          cancelable: true,
+          view: window,
+        })
+      );
+      marker.dispatchEvent(
+        new MouseEvent("mouseenter", {
+          bubbles: false,
+          cancelable: true,
+          view: window,
+        })
+      );
+      return true;
+    } catch (_error) {
+      return false;
+    } finally {
+      setTimeout(function () {
+        marker.__ambossSyntheticOpen = false;
+      }, 0);
+    }
+  }
+
+  function blockHoverAndFocus(event) {
+    var marker = closestMarker(event.target);
+    if (!marker) {
+      return;
+    }
+    if (marker.__ambossSyntheticOpen) {
+      return;
+    }
+    if (typeof event.stopImmediatePropagation === "function") {
+      event.stopImmediatePropagation();
+    }
+    if (typeof event.stopPropagation === "function") {
+      event.stopPropagation();
+    }
+  }
+
   function onClickCapture(event) {
     var marker = closestMarker(event.target);
     if (marker) {
@@ -335,6 +403,11 @@ _AMBOSS_TRIGGER_PATCH_JS = r"""
       }
 
       if (showTooltipFromManagers(marker)) {
+        stopEvent(event);
+        return;
+      }
+
+      if (syntheticOpenFromClick(marker)) {
         stopEvent(event);
       }
       return;
@@ -371,6 +444,14 @@ _AMBOSS_TRIGGER_PATCH_JS = r"""
   var listeners = [];
   document.addEventListener("click", onClickCapture, true);
   listeners.push(["click", onClickCapture]);
+  document.addEventListener("mouseover", blockHoverAndFocus, true);
+  listeners.push(["mouseover", blockHoverAndFocus]);
+  document.addEventListener("mousemove", blockHoverAndFocus, true);
+  listeners.push(["mousemove", blockHoverAndFocus]);
+  document.addEventListener("mouseenter", blockHoverAndFocus, true);
+  listeners.push(["mouseenter", blockHoverAndFocus]);
+  document.addEventListener("focusin", blockHoverAndFocus, true);
+  listeners.push(["focusin", blockHoverAndFocus]);
 
   var observer = null;
   try {
