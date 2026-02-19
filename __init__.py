@@ -123,16 +123,13 @@ _AMBOSS_TRIGGER_PATCH_JS = r"""
 
     var patched = false;
 
-    var forceTrigger = FORCE_TRIGGER;
-    if (
+    var isCompatManager = Boolean(
       manager &&
-      typeof manager.showTooltipOnElement !== "function" &&
-      typeof manager.hideAll === "function"
-    ) {
-      // Template-injected AMBOSS runtime relies on delegated hover internals.
-      // Keep hover trigger enabled and gate it ourselves, then open on click.
-      forceTrigger = COMPAT_TRIGGER;
-    }
+        typeof manager.showTooltipOnElement !== "function" &&
+        typeof manager.hideAll === "function"
+    );
+
+    var forceTrigger = isCompatManager ? COMPAT_TRIGGER : FORCE_TRIGGER;
 
     if (setTriggerOnOptions(manager.tippyOptions, forceTrigger)) {
       patched = true;
@@ -180,7 +177,13 @@ _AMBOSS_TRIGGER_PATCH_JS = r"""
     ) {
       var originalCreate = manager._createTippyOnElement;
       manager._createTippyOnElement = function (element) {
-        setTriggerOnOptions(this && this.tippyOptions, FORCE_TRIGGER);
+        var createTrigger =
+          this &&
+          typeof this.showTooltipOnElement !== "function" &&
+          typeof this.hideAll === "function"
+            ? COMPAT_TRIGGER
+            : FORCE_TRIGGER;
+        setTriggerOnOptions(this && this.tippyOptions, createTrigger);
         var instance = originalCreate.call(this, element);
         patchInstance(instance);
         patchElementTippy(element);
