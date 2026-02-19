@@ -60,8 +60,25 @@ _AMBOSS_TRIGGER_PATCH_JS = r"""
     if (!target || !markerSelector) {
       return null;
     }
-    if (typeof target.closest === "function") {
-      return target.closest(markerSelector);
+
+    var node = target;
+    if (node.nodeType === 3) {
+      node = node.parentElement;
+    }
+
+    if (node && typeof node.closest === "function") {
+      return node.closest(markerSelector);
+    }
+
+    while (node && node !== document) {
+      if (
+        node.nodeType === 1 &&
+        typeof node.matches === "function" &&
+        node.matches(markerSelector)
+      ) {
+        return node;
+      }
+      node = node.parentNode;
     }
     return null;
   }
@@ -148,6 +165,58 @@ _AMBOSS_TRIGGER_PATCH_JS = r"""
     return true;
   }
 
+  function patchDeckTemplateController(controller) {
+    if (!controller || typeof controller !== "object") {
+      return false;
+    }
+
+    var patched = false;
+    var tooltipManager = controller.ambossTooltips;
+    if (!tooltipManager || typeof tooltipManager !== "object") {
+      return false;
+    }
+
+    if (setTriggerOnOptions(tooltipManager.tippyOptions)) {
+      patched = true;
+    }
+    if (tooltipManager.tippyOptions && typeof tooltipManager.tippyOptions === "object") {
+      tooltipManager.tippyOptions.trigger = FORCE_TRIGGER;
+      patched = true;
+    }
+
+    if (
+      !tooltipManager.__forceClickPatched &&
+      typeof tooltipManager.initialize === "function"
+    ) {
+      var originalInitialize = tooltipManager.initialize;
+      tooltipManager.initialize = function () {
+        setTriggerOnOptions(this && this.tippyOptions);
+        if (this && this.tippyOptions) {
+          this.tippyOptions.trigger = FORCE_TRIGGER;
+        }
+        var value = originalInitialize.apply(this, arguments);
+        var root = document.querySelector((this && this.selector) || "#qa");
+        if (root) {
+          patchInstance(root._tippy);
+        }
+        return value;
+      };
+      tooltipManager.__forceClickPatched = true;
+      patched = true;
+    }
+
+    if (installClickGate(tooltipManager)) {
+      patched = true;
+    }
+
+    var root = document.querySelector((tooltipManager && tooltipManager.selector) || "#qa");
+    if (root && patchInstance(root._tippy)) {
+      patched = true;
+    }
+
+    return patched;
+  }
+
   function patchManager(manager) {
     if (!manager || (typeof manager !== "object" && typeof manager !== "function")) {
       return false;
@@ -223,21 +292,23 @@ _AMBOSS_TRIGGER_PATCH_JS = r"""
   function apply() {
     var patched = false;
     var addon = window.ambossAddon && window.ambossAddon.tooltip;
-    if (!addon) {
-      return false;
+    if (addon) {
+      if (patchManager(addon)) {
+        patched = true;
+      }
+      if (patchManager(addon.tooltips)) {
+        patched = true;
+      }
+      if (patchManager(addon.default)) {
+        patched = true;
+      }
+
+      if (installClickGate(addon.tooltips || addon)) {
+        patched = true;
+      }
     }
 
-    if (patchManager(addon)) {
-      patched = true;
-    }
-    if (patchManager(addon.tooltips)) {
-      patched = true;
-    }
-    if (patchManager(addon.default)) {
-      patched = true;
-    }
-
-    if (installClickGate(addon.tooltips || addon)) {
+    if (patchDeckTemplateController(window.ambossController)) {
       patched = true;
     }
 
@@ -257,14 +328,12 @@ _AMBOSS_TRIGGER_PATCH_JS = r"""
     return patched;
   }
 
-  if (apply()) {
-    return;
-  }
-
+  apply();
   var attempts = 0;
   var timer = setInterval(function () {
     attempts += 1;
-    if (apply() || attempts >= 300) {
+    apply();
+    if (attempts >= 300) {
       clearInterval(timer);
     }
   }, 50);
