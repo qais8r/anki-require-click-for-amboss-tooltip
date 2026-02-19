@@ -353,7 +353,11 @@ _AMBOSS_TRIGGER_PATCH_JS = r"""
           view: window,
         })
       );
-      return true;
+      return Boolean(
+        marker._tippy &&
+          marker._tippy.state &&
+          marker._tippy.state.isVisible
+      );
     } catch (_error) {
       return false;
     } finally {
@@ -398,8 +402,10 @@ _AMBOSS_TRIGGER_PATCH_JS = r"""
       if (instance && typeof instance.show === "function") {
         patchInstance(instance);
         instance.show();
-        stopEvent(event);
-        return;
+        if (instance.state && instance.state.isVisible) {
+          stopEvent(event);
+          return;
+        }
       }
 
       if (showTooltipFromManagers(marker)) {
@@ -446,10 +452,6 @@ _AMBOSS_TRIGGER_PATCH_JS = r"""
   listeners.push(["click", onClickCapture]);
   document.addEventListener("mouseover", blockHoverAndFocus, true);
   listeners.push(["mouseover", blockHoverAndFocus]);
-  document.addEventListener("mousemove", blockHoverAndFocus, true);
-  listeners.push(["mousemove", blockHoverAndFocus]);
-  document.addEventListener("mouseenter", blockHoverAndFocus, true);
-  listeners.push(["mouseenter", blockHoverAndFocus]);
   document.addEventListener("focusin", blockHoverAndFocus, true);
   listeners.push(["focusin", blockHoverAndFocus]);
 
