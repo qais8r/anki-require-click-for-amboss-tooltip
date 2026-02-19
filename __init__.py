@@ -56,6 +56,98 @@ _AMBOSS_TRIGGER_PATCH_JS = r"""
     return patched;
   }
 
+  function findClosestMarker(target, markerSelector) {
+    if (!target || !markerSelector) {
+      return null;
+    }
+    if (typeof target.closest === "function") {
+      return target.closest(markerSelector);
+    }
+    return null;
+  }
+
+  function showTooltipOnClick(marker, manager) {
+    if (!marker) {
+      return false;
+    }
+
+    try {
+      patchInstance(marker._tippy);
+      if (marker._tippy && typeof marker._tippy.show === "function") {
+        marker._tippy.show();
+        return true;
+      }
+
+      if (manager && typeof manager.showTooltipOnElement === "function") {
+        manager.showTooltipOnElement(marker);
+        return true;
+      }
+
+      var addon = window.ambossAddon && window.ambossAddon.tooltip;
+      if (addon && addon.tooltips && typeof addon.tooltips.showTooltipOnElement === "function") {
+        addon.tooltips.showTooltipOnElement(marker);
+        return true;
+      }
+      if (addon && typeof addon.showTooltipOnElement === "function") {
+        addon.showTooltipOnElement(marker);
+        return true;
+      }
+    } catch (_error) {}
+
+    return false;
+  }
+
+  function installClickGate(manager) {
+    var selector = (manager && manager.selector) || "#qa";
+    if (typeof selector !== "string") {
+      return false;
+    }
+
+    var root = document.querySelector(selector);
+    if (!root) {
+      return false;
+    }
+    if (root.__ambossForceClickGateInstalled) {
+      return true;
+    }
+
+    var markClass = (manager && manager.markClass) || "amboss-marker";
+    var markerSelector = "." + markClass;
+
+    var blockHoverAndFocus = function (event) {
+      var marker = findClosestMarker(event.target, markerSelector);
+      if (!marker) {
+        return;
+      }
+      if (typeof event.stopImmediatePropagation === "function") {
+        event.stopImmediatePropagation();
+      }
+      if (typeof event.stopPropagation === "function") {
+        event.stopPropagation();
+      }
+    };
+
+    root.addEventListener("mouseover", blockHoverAndFocus, true);
+    root.addEventListener("mousemove", blockHoverAndFocus, true);
+    root.addEventListener("mouseenter", blockHoverAndFocus, true);
+    root.addEventListener("focusin", blockHoverAndFocus, true);
+
+    root.addEventListener(
+      "click",
+      function (event) {
+        var marker = findClosestMarker(event.target, markerSelector);
+        if (!marker) {
+          return;
+        }
+        showTooltipOnClick(marker, manager);
+      },
+      true
+    );
+
+    root.__ambossForceClickGateInstalled = true;
+    return true;
+  }
+
   function patchManager(manager) {
     if (!manager || (typeof manager !== "object" && typeof manager !== "function")) {
       return false;
@@ -76,6 +168,10 @@ _AMBOSS_TRIGGER_PATCH_JS = r"""
           patched = true;
         }
       }
+    }
+
+    if (installClickGate(manager)) {
+      patched = true;
     }
 
     var selector = manager.selector || "#qa";
@@ -141,12 +237,19 @@ _AMBOSS_TRIGGER_PATCH_JS = r"""
       patched = true;
     }
 
+    if (installClickGate(addon.tooltips || addon)) {
+      patched = true;
+    }
+
     var qa = document.querySelector("#qa");
     if (qa) {
       if (patchInstance(qa._tippy)) {
         patched = true;
       }
       if (patchExistingTippies(qa)) {
+        patched = true;
+      }
+      if (installClickGate(null)) {
         patched = true;
       }
     }
