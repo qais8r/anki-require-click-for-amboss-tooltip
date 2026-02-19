@@ -394,13 +394,27 @@ _AMBOSS_TRIGGER_PATCH_JS = r"""
     if (!marker) {
       return;
     }
-    setTimeout(function () {
+
+    var attempts = 0;
+    var maxAttempts = 14; // ~350ms at 25ms interval
+
+    var tryOpen = function () {
+      attempts += 1;
       try {
         var instance = marker._tippy;
+        if (
+          instance &&
+          instance.state &&
+          instance.state.isVisible
+        ) {
+          return true;
+        }
+
         if (!instance) {
           syntheticOpenFromClick(marker);
           instance = marker._tippy;
         }
+
         if (
           instance &&
           typeof instance.show === "function" &&
@@ -409,8 +423,26 @@ _AMBOSS_TRIGGER_PATCH_JS = r"""
           patchInstance(instance);
           instance.show();
         }
-      } catch (_error) {}
-    }, 0);
+
+        return Boolean(
+          marker._tippy &&
+            marker._tippy.state &&
+            marker._tippy.state.isVisible
+        );
+      } catch (_error) {
+        return false;
+      }
+    };
+
+    if (tryOpen()) {
+      return;
+    }
+
+    var timer = setInterval(function () {
+      if (tryOpen() || attempts >= maxAttempts) {
+        clearInterval(timer);
+      }
+    }, 25);
   }
 
   function onClickCapture(event) {
