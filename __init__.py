@@ -375,6 +375,25 @@ _AMBOSS_TRIGGER_PATCH_JS = r"""
     if (!marker) {
       return;
     }
+    if (isOneByOneClozeMarker(marker) && event.type === "mouseover") {
+      // On template-only AMBOSS runtime, one-by-one cloze blocks click bubbling.
+      // Allow trusted hover to reach delegate so marker._tippy gets created,
+      // but immediately hide hover-opened tooltip to preserve click-first UX.
+      setTimeout(function () {
+        try {
+          var instance = marker._tippy;
+          if (
+            instance &&
+            instance.state &&
+            instance.state.isVisible &&
+            typeof instance.hide === "function"
+          ) {
+            instance.hide();
+          }
+        } catch (_error) {}
+      }, 0);
+      return;
+    }
     if (marker.__ambossSyntheticOpen) {
       return;
     }
