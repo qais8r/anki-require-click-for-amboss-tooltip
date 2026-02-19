@@ -278,13 +278,20 @@ _AMBOSS_TRIGGER_PATCH_JS = r"""
           return;
         }
 
-        if (isVisibleTooltipForMarker(marker, resolvedManager)) {
+        var stopMarkerEvent = function () {
           if (typeof event.stopImmediatePropagation === "function") {
             event.stopImmediatePropagation();
           }
           if (typeof event.stopPropagation === "function") {
             event.stopPropagation();
           }
+          if (typeof event.preventDefault === "function") {
+            event.preventDefault();
+          }
+        };
+
+        if (isVisibleTooltipForMarker(marker, resolvedManager)) {
+          stopMarkerEvent();
           var hidden = false;
           if (marker._tippy && typeof marker._tippy.hide === "function") {
             marker._tippy.hide();
@@ -296,7 +303,14 @@ _AMBOSS_TRIGGER_PATCH_JS = r"""
           return;
         }
 
-        // Let AMBOSS/tippy's own delegated click handler create/show the tooltip.
+        // Handle marker clicks directly so one-by-one cloze click handlers
+        // (which stop propagation) cannot block AMBOSS delegated handlers.
+        if (showTooltipOnClick(marker, resolvedManager)) {
+          stopMarkerEvent();
+          return;
+        }
+
+        // Fallback: let AMBOSS/tippy's delegated click handler create/show the tooltip.
         patchInstance(marker._tippy);
       },
       true
