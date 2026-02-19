@@ -130,6 +130,43 @@ _AMBOSS_TRIGGER_PATCH_JS = r"""
     return false;
   }
 
+  function hideVisibleTippiesWithAnimation(root) {
+    var context = root || document;
+    var hiddenAny = false;
+
+    try {
+      var markers = context.querySelectorAll
+        ? context.querySelectorAll(".amboss-marker")
+        : [];
+      for (var i = 0; i < markers.length; i += 1) {
+        var marker = markers[i];
+        if (
+          marker &&
+          marker._tippy &&
+          marker._tippy.state &&
+          marker._tippy.state.isVisible &&
+          typeof marker._tippy.hide === "function"
+        ) {
+          marker._tippy.hide();
+          hiddenAny = true;
+        }
+      }
+
+      if (
+        context &&
+        context._tippy &&
+        context._tippy.state &&
+        context._tippy.state.isVisible &&
+        typeof context._tippy.hide === "function"
+      ) {
+        context._tippy.hide();
+        hiddenAny = true;
+      }
+    } catch (_error) {}
+
+    return hiddenAny;
+  }
+
   function isVisibleTooltipForMarker(marker, manager) {
     if (!marker) {
       return false;
@@ -248,10 +285,14 @@ _AMBOSS_TRIGGER_PATCH_JS = r"""
           if (typeof event.stopPropagation === "function") {
             event.stopPropagation();
           }
+          var hidden = false;
           if (marker._tippy && typeof marker._tippy.hide === "function") {
             marker._tippy.hide();
+            hidden = true;
           }
-          hideAllTooltips(resolvedManager);
+          if (!hidden) {
+            hideVisibleTippiesWithAnimation(root);
+          }
           return;
         }
 
@@ -280,7 +321,9 @@ _AMBOSS_TRIGGER_PATCH_JS = r"""
             return;
           }
 
-          hideAllTooltips(null);
+          if (!hideVisibleTippiesWithAnimation(document.querySelector("#qa"))) {
+            hideAllTooltips(null);
+          }
         },
         true
       );
