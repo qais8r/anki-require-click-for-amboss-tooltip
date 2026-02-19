@@ -383,9 +383,40 @@ _AMBOSS_TRIGGER_PATCH_JS = r"""
     }
   }
 
+  function isOneByOneClozeMarker(marker) {
+    if (!marker || typeof marker.closest !== "function") {
+      return false;
+    }
+    return Boolean(marker.closest(".cloze.one-by-one"));
+  }
+
+  function deferredShowMarkerTooltip(marker) {
+    if (!marker) {
+      return;
+    }
+    setTimeout(function () {
+      try {
+        var instance = marker._tippy;
+        if (!instance) {
+          syntheticOpenFromClick(marker);
+          instance = marker._tippy;
+        }
+        if (
+          instance &&
+          typeof instance.show === "function" &&
+          !(instance.state && instance.state.isVisible)
+        ) {
+          patchInstance(instance);
+          instance.show();
+        }
+      } catch (_error) {}
+    }, 0);
+  }
+
   function onClickCapture(event) {
     var marker = closestMarker(event.target);
     if (marker) {
+      var onOneByOneCloze = isOneByOneClozeMarker(marker);
       var instance = getOrCreateMarkerInstance(marker);
 
       if (
@@ -414,6 +445,14 @@ _AMBOSS_TRIGGER_PATCH_JS = r"""
       }
 
       if (syntheticOpenFromClick(marker)) {
+        stopEvent(event);
+        return;
+      }
+
+      if (onOneByOneCloze) {
+        // One-by-one cloze adds a click handler that stops propagation and can
+        // interfere with delegated tooltip opening. Consume click and retry.
+        deferredShowMarkerTooltip(marker);
         stopEvent(event);
       }
       return;
