@@ -449,9 +449,61 @@ _AMBOSS_TRIGGER_PATCH_JS = r"""
     return Boolean(marker.closest(".cloze.one-by-one"));
   }
 
+  function deferredShowMarkerTooltip(marker) {
+    if (!marker) {
+      return;
+    }
+
+    var attempts = 0;
+    var maxAttempts = 14; // ~350ms
+
+    var tryOpen = function () {
+      attempts += 1;
+      try {
+        var instance = marker._tippy;
+        if (instance && instance.state && instance.state.isVisible) {
+          return true;
+        }
+
+        if (!instance) {
+          syntheticOpenFromClick(marker);
+          instance = marker._tippy;
+        }
+
+        if (
+          instance &&
+          typeof instance.show === "function" &&
+          !(instance.state && instance.state.isVisible)
+        ) {
+          patchInstance(instance);
+          instance.show();
+        }
+
+        return Boolean(
+          marker._tippy &&
+            marker._tippy.state &&
+            marker._tippy.state.isVisible
+        );
+      } catch (_error) {
+        return false;
+      }
+    };
+
+    if (tryOpen()) {
+      return;
+    }
+
+    var timer = setInterval(function () {
+      if (tryOpen() || attempts >= maxAttempts) {
+        clearInterval(timer);
+      }
+    }, 25);
+  }
+
   function onClickCapture(event) {
     var marker = closestMarker(event.target);
     if (marker) {
+      var onOneByOneCloze = isOneByOneClozeMarker(marker);
       var instance = getOrCreateMarkerInstance(marker);
 
       if (
@@ -482,6 +534,13 @@ _AMBOSS_TRIGGER_PATCH_JS = r"""
       if (syntheticOpenFromClick(marker)) {
         stopEvent(event);
         return;
+      }
+
+      if (onOneByOneCloze) {
+        // Ensure first click opens tooltip on one-by-one cards by keeping
+        // cloze click handlers from consuming the interaction.
+        stopEvent(event);
+        deferredShowMarkerTooltip(marker);
       }
       return;
     }
