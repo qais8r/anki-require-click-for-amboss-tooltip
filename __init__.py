@@ -7,6 +7,43 @@ _AMBOSS_TRIGGER_PATCH_JS = r"""
   var ROOT_SELECTOR = "#qa";
   var MARKER_SELECTOR = ".amboss-marker";
 
+  function installOneByOneStopPropagationBypass() {
+    if (window.__ambossStopPropagationBypassInstalled) {
+      return;
+    }
+
+    var originalStopPropagation = Event.prototype.stopPropagation;
+    Event.prototype.stopPropagation = function () {
+      try {
+        if (!this || this.type !== "click") {
+          return originalStopPropagation.apply(this, arguments);
+        }
+
+        var target = this.target;
+        var currentTarget = this.currentTarget;
+        var marker = target && typeof target.closest === "function"
+          ? target.closest(MARKER_SELECTOR)
+          : null;
+
+        var isOneByOneClozeHandler =
+          currentTarget &&
+          currentTarget.classList &&
+          currentTarget.classList.contains("cloze") &&
+          currentTarget.classList.contains("one-by-one");
+
+        // Let marker clicks bubble past one-by-one cloze handler so delegated
+        // AMBOSS click listeners can run on template-only runtimes.
+        if (marker && isOneByOneClozeHandler) {
+          return;
+        }
+      } catch (_error) {}
+
+      return originalStopPropagation.apply(this, arguments);
+    };
+
+    window.__ambossStopPropagationBypassInstalled = true;
+  }
+
   function setTriggerOnOptions(options, triggerValue) {
     if (!options || typeof options !== "object") {
       return false;
@@ -412,65 +449,9 @@ _AMBOSS_TRIGGER_PATCH_JS = r"""
     return Boolean(marker.closest(".cloze.one-by-one"));
   }
 
-  function deferredShowMarkerTooltip(marker) {
-    if (!marker) {
-      return;
-    }
-
-    var attempts = 0;
-    var maxAttempts = 14; // ~350ms at 25ms interval
-
-    var tryOpen = function () {
-      attempts += 1;
-      try {
-        var instance = marker._tippy;
-        if (
-          instance &&
-          instance.state &&
-          instance.state.isVisible
-        ) {
-          return true;
-        }
-
-        if (!instance) {
-          syntheticOpenFromClick(marker);
-          instance = marker._tippy;
-        }
-
-        if (
-          instance &&
-          typeof instance.show === "function" &&
-          !(instance.state && instance.state.isVisible)
-        ) {
-          patchInstance(instance);
-          instance.show();
-        }
-
-        return Boolean(
-          marker._tippy &&
-            marker._tippy.state &&
-            marker._tippy.state.isVisible
-        );
-      } catch (_error) {
-        return false;
-      }
-    };
-
-    if (tryOpen()) {
-      return;
-    }
-
-    var timer = setInterval(function () {
-      if (tryOpen() || attempts >= maxAttempts) {
-        clearInterval(timer);
-      }
-    }, 25);
-  }
-
   function onClickCapture(event) {
     var marker = closestMarker(event.target);
     if (marker) {
-      var onOneByOneCloze = isOneByOneClozeMarker(marker);
       var instance = getOrCreateMarkerInstance(marker);
 
       if (
@@ -502,13 +483,6 @@ _AMBOSS_TRIGGER_PATCH_JS = r"""
         stopEvent(event);
         return;
       }
-
-      if (onOneByOneCloze) {
-        // One-by-one cloze adds a click handler that stops propagation and can
-        // interfere with delegated tooltip opening. Consume click and retry.
-        deferredShowMarkerTooltip(marker);
-        stopEvent(event);
-      }
       return;
     }
 
@@ -520,6 +494,7 @@ _AMBOSS_TRIGGER_PATCH_JS = r"""
   }
 
   function applyPatch() {
+    installOneByOneStopPropagationBypass();
     patchManagers();
     patchExistingElements();
   }
