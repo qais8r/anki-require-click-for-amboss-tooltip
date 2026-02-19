@@ -1,60 +1,167 @@
 from aqt import gui_hooks, mw
 
 _AMBOSS_TRIGGER_PATCH_JS = r"""
-(() => {
-  const FORCE_TRIGGER = 'click';
+(function () {
+  var FORCE_TRIGGER = "click";
 
-  const patchInstance = (instance) => {
-    if (!instance || typeof instance.setProps !== 'function') {
+  function setTriggerOnOptions(options) {
+    if (!options || typeof options !== "object") {
       return false;
     }
-    instance.setProps({ trigger: FORCE_TRIGGER });
+    options.trigger = FORCE_TRIGGER;
     return true;
-  };
+  }
 
-  const patchElementTippy = (el) => patchInstance(el && el._tippy);
-
-  const patchExistingTippies = (root) => {
-    if (!root) {
+  function patchInstance(instance) {
+    if (!instance || typeof instance !== "object") {
       return false;
     }
-    let patched = patchElementTippy(root);
-    for (const el of root.querySelectorAll('*')) {
-      patched = patchElementTippy(el) || patched;
-    }
-    return patched;
-  };
 
-  const apply = () => {
-    if (!window.ambossAddon || !ambossAddon.tooltip || !ambossAddon.tooltip.tooltips) {
+    try {
+      if (typeof instance.setProps === "function") {
+        instance.setProps({ trigger: FORCE_TRIGGER });
+        return true;
+      }
+      if (typeof instance.set === "function") {
+        instance.set({ trigger: FORCE_TRIGGER });
+        return true;
+      }
+      if (instance.props && typeof instance.props === "object") {
+        instance.props.trigger = FORCE_TRIGGER;
+        return true;
+      }
+    } catch (_error) {}
+    return false;
+  }
+
+  function patchElementTippy(element) {
+    if (!element || typeof element !== "object") {
       return false;
     }
-    const tooltips = ambossAddon.tooltip.tooltips;
-    if (tooltips.tippyOptions) {
-      tooltips.tippyOptions.trigger = FORCE_TRIGGER;
+    return patchInstance(element._tippy);
+  }
+
+  function patchExistingTippies(root) {
+    if (!root || typeof root.querySelectorAll !== "function") {
+      return false;
     }
-    if (tooltips.delegateOptions) {
-      tooltips.delegateOptions.trigger = FORCE_TRIGGER;
-    }
-    if (Array.isArray(tooltips.instances)) {
-      for (const instance of tooltips.instances) {
-        patchInstance(instance);
+
+    var patched = patchElementTippy(root);
+    var elements = root.querySelectorAll("*");
+    for (var i = 0; i < elements.length; i += 1) {
+      if (patchElementTippy(elements[i])) {
+        patched = true;
       }
     }
-    const selector = tooltips.selector || '#qa';
-    const root = document.querySelector(selector);
-    patchExistingTippies(root);
-    return true;
-  };
+    return patched;
+  }
+
+  function patchManager(manager) {
+    if (!manager || (typeof manager !== "object" && typeof manager !== "function")) {
+      return false;
+    }
+
+    var patched = false;
+
+    if (setTriggerOnOptions(manager.tippyOptions)) {
+      patched = true;
+    }
+    if (setTriggerOnOptions(manager.delegateOptions)) {
+      patched = true;
+    }
+
+    if (Array.isArray(manager.instances)) {
+      for (var i = 0; i < manager.instances.length; i += 1) {
+        if (patchInstance(manager.instances[i])) {
+          patched = true;
+        }
+      }
+    }
+
+    var selector = manager.selector || "#qa";
+    if (typeof selector === "string") {
+      var root = document.querySelector(selector);
+      if (root) {
+        if (patchInstance(root._tippy)) {
+          patched = true;
+        }
+        if (patchExistingTippies(root)) {
+          patched = true;
+        }
+      }
+    }
+
+    if (!manager.__forceClickPatched && typeof manager.initialize === "function") {
+      var originalInitialize = manager.initialize;
+      manager.initialize = function () {
+        setTriggerOnOptions(this && this.tippyOptions);
+        var value = originalInitialize.apply(this, arguments);
+        var root = document.querySelector((this && this.selector) || "#qa");
+        if (root) {
+          patchInstance(root._tippy);
+        }
+        return value;
+      };
+      manager.__forceClickPatched = true;
+      patched = true;
+    }
+
+    if (
+      !manager.__forceClickCreatePatched &&
+      typeof manager._createTippyOnElement === "function"
+    ) {
+      var originalCreateTippyOnElement = manager._createTippyOnElement;
+      manager._createTippyOnElement = function (element) {
+        setTriggerOnOptions(this && this.tippyOptions);
+        var instance = originalCreateTippyOnElement.call(this, element);
+        patchInstance(instance);
+        return instance;
+      };
+      manager.__forceClickCreatePatched = true;
+      patched = true;
+    }
+
+    return patched;
+  }
+
+  function apply() {
+    var patched = false;
+    var addon = window.ambossAddon && window.ambossAddon.tooltip;
+    if (!addon) {
+      return false;
+    }
+
+    if (patchManager(addon)) {
+      patched = true;
+    }
+    if (patchManager(addon.tooltips)) {
+      patched = true;
+    }
+    if (patchManager(addon.default)) {
+      patched = true;
+    }
+
+    var qa = document.querySelector("#qa");
+    if (qa) {
+      if (patchInstance(qa._tippy)) {
+        patched = true;
+      }
+      if (patchExistingTippies(qa)) {
+        patched = true;
+      }
+    }
+
+    return patched;
+  }
 
   if (apply()) {
     return;
   }
 
-  let attempts = 0;
-  const timer = setInterval(() => {
+  var attempts = 0;
+  var timer = setInterval(function () {
     attempts += 1;
-    if (apply() || attempts >= 100) {
+    if (apply() || attempts >= 300) {
       clearInterval(timer);
     }
   }, 50);

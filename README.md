@@ -1,9 +1,10 @@
 # Require click for AMBOSS tooltip
+
 Install the Anki addon from [AnkiWeb](https://ankiweb.net/shared/info/354696931).
 
 ## Description
 
-🔎 Disable AMBOSS tooltips on hover and require a click instead. 
+🔎 Disable AMBOSS tooltips on hover and require a click instead.
 
 ![Demonstration showing how AMBOSS tooltips require a click instead of hover](https://github.com/qais8r/anki-require-click-for-amboss-tooltip/blob/main/assets/demo.gif?raw=true)
 
